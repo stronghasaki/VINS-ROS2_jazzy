@@ -79,7 +79,7 @@ evo_ape tum groundtruth.tum vio.csv -a -as --t_max_diff 0.02
 8. **PEP 668 / numpy-scipy 二进制冲突** 装 evo → 见博客详解。
 
 完整施工日志（含每个报错的原文、根因与教训）：
-[blog/01-pitfalls-log.md](../blog/01-pitfalls-log.md)
+[docs/01-pitfalls-log.md](docs/01-pitfalls-log.md)
 
 ## 仓库结构
 
@@ -92,7 +92,7 @@ evo_ape tum groundtruth.tum vio.csv -a -as --t_max_diff 0.02
 │   └── vins/            # 核心估计器
 ├── docker/Dockerfile.base   # 依赖镜像（Ceres 2.1.0 tarball 内置，构建不依赖外网）
 ├── scripts/eval_euroc.sh    # evo ATE 评测
-└── scripts/mh01_easy_vio.*  # 基准轨迹与 evo 结果
+
 ```
 
 ## 致谢与许可
