@@ -15,6 +15,23 @@
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/point_cloud.hpp>
 #include <sensor_msgs/msg/image.hpp>
+
+// vjlab: C++ 不会展开 ~， ofstream 会在目录不存在时静默失败。
+// 这里统一展开 ~ 并确保目录存在。
+static std::string expand_and_ensure_dir(std::string p)
+{
+    if (!p.empty() && p[0] == '~')
+    {
+        const char* home = getenv("HOME");
+        if (home) p = std::string(home) + p.substr(1);
+    }
+    if (!p.empty())
+    {
+        std::string cmd = "mkdir -p '" + p + "'";
+        if (system(cmd.c_str())) {} // 忽略返回值
+    }
+    return p;
+}
 // #include <sensor_msgs/image_encodings.h>
 #include "image_encodings.hpp"
 #include <visualization_msgs/msg/marker.hpp>
@@ -467,7 +484,7 @@ int main(int argc, char **argv)
     m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(cam0Path.c_str());
 
     fsSettings["image0_topic"] >> IMAGE_TOPIC;        
-    fsSettings["pose_graph_save_path"] >> POSE_GRAPH_SAVE_PATH;
+    fsSettings["pose_graph_save_path"] >> POSE_GRAPH_SAVE_PATH; POSE_GRAPH_SAVE_PATH = expand_and_ensure_dir(POSE_GRAPH_SAVE_PATH);
     fsSettings["output_path"] >> VINS_RESULT_PATH;
     fsSettings["save_image"] >> DEBUG_IMAGE;
 

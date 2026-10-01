@@ -9,6 +9,23 @@
 
 #include "parameters.h"
 
+// vjlab: C++ 不会展开 ~， ofstream 会在目录不存在时静默失败。
+// 这里统一展开 ~ 并确保目录存在。
+static std::string expand_and_ensure_dir(std::string p)
+{
+    if (!p.empty() && p[0] == '~')
+    {
+        const char* home = getenv("HOME");
+        if (home) p = std::string(home) + p.substr(1);
+    }
+    if (!p.empty())
+    {
+        std::string cmd = "mkdir -p '" + p + "'";
+        if (system(cmd.c_str())) {} // 忽略返回值
+    }
+    return p;
+}
+
 double INIT_DEPTH;
 double MIN_PARALLAX;
 double ACC_N, ACC_W;
@@ -119,7 +136,7 @@ void readParameters(std::string config_file)
     MIN_PARALLAX = fsSettings["keyframe_parallax"];
     MIN_PARALLAX = MIN_PARALLAX / FOCAL_LENGTH;
 
-    fsSettings["output_path"] >> OUTPUT_FOLDER;
+    fsSettings["output_path"] >> OUTPUT_FOLDER; OUTPUT_FOLDER = expand_and_ensure_dir(OUTPUT_FOLDER);
     VINS_RESULT_PATH = OUTPUT_FOLDER + "/vio.csv";
     std::cout << "result path " << VINS_RESULT_PATH << std::endl;
     std::ofstream fout(VINS_RESULT_PATH, std::ios::out);
