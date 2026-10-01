@@ -92,7 +92,8 @@ evo_ape tum groundtruth.tum vio.csv -a -as --t_max_diff 0.02
 │   └── vins/            # 核心估计器
 ├── docker/Dockerfile.base   # 依赖镜像（Ceres 2.1.0 tarball 内置，构建不依赖外网）
 ├── scripts/eval_euroc.sh    # evo ATE 评测
-
+├── scripts/mh01_easy_vio.*  # 基准轨迹样例与 evo 结果
+└── docs/01-pitfalls-log.md  # 施工日志
 ```
 
 ## 致谢与许可
