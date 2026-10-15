@@ -66,7 +66,7 @@ RUN apt-get install -y libopencv-dev libboost-filesystem-dev \
 
 ### 6. 只挂载 install/ 时 launch 无报错但 estimator 不启动
 
-- **现象**：`ros2 launch vins euroc.launch.py` 无报错，但 estimator 未运行，输出文件是旧数据。
+- **现象**：`ros2 launch vins euroc.launch.py` 无报错，输出文件是上一次的旧数据。
 - **根因**：colcon `--symlink-install` 生成的 `install/vins/lib/vins/vins_node` 是指向 `/ws/build/...` 的符号链接；容器只挂载 `install/` 时可执行文件不存在，而 launch 文件对"进程未启动"是静默的。
 - **解法**：挂载成对出现：`-v repo/build:/ws/build -v repo/install:/ws/install`。排查命令：`ls -la install/vins/lib/vins/` 查看链接指向。
 - **原理**：symlink install 将构建产物与安装产物绑定，容器挂载 / 打包 / 跨机拷贝时任一单独存在都是坏的；要么成对携带，要么构建时不用 `--symlink-install`。
@@ -80,23 +80,22 @@ RUN apt-get install -y libopencv-dev libboost-filesystem-dev \
   1. `foutC.precision(0)` 将时间戳截成整数秒（如 `1403636584`），与真值纳秒/微秒精度无法对齐；
   2. C++ `ofstream` 不展开 `~`，目录不存在时静默失败、不报任何错。
 - **解法**：本仓库已改为标准 TUM 格式（`t tx ty tz qx qy qz qw`，微秒精度时间戳），并在读配置处加"展开 `~` + `mkdir -p`"兜底。
-- **原理**：评测失败未必在算法侧；移植/复现默认"上游输出格式不可信"，先检查 IO 代码再跑评测。
 
 ### 8. 真值四元数列序：EuRoC 是 wxyz，TUM 是 xyzw，awk 一列之差旋转评测全毁
 
 - **现象**：自写真值转换脚本转出 TUM 后，`evo_ape -va` 报 `invalid (must be unit quaternions)`。平移 ATE"看起来完全正常"，旋转评测（`-r angle_deg`）误差却是 66° 量级，全程无报错。
 - **根因**：官方 `state_groundtruth_estimate0/data.csv` 的实际格式是第 1 行 `#` 注释头 + 逗号分隔（CSV），列序 `$1=timestamp, $2..4=px py pz, $5=qw $6=qx $7=qy $8=qz, $9..=vx vy vz`（wxyz）。转换脚本两层错误：(a) 写成 `$6 $7 $8 $9`——把线速度 vx（$9）当 qw 塞进 TUM 第 8 列，正确取法 `$6 $7 $8 $5`；(b) 注释假设"无逗号、3 行注释头"，对官方文件用 awk 默认空白分隔会把整行吞成 $1，字段全空。
-- **为什么 evo 不报错、平移 ATE 还是对的**：`evo/tools/file_interface.py` 的 `read_tum_trajectory_file` 读入后只做列 roll（xyzw→wxyz），不归一化也不校验模长（模长校验只在 `check()` 里警告）。更关键的是：**平移 APE 和 Umeyama 对齐只用位置坐标**，四元数列根本不进这条路径——所以 A/B 实测两种列序的平移 RMSE 逐位相同（0.1176 m）。四元数只在旋转评测和一切用到真值姿态的场景生效，那里 2.77° 变 66.3°，无任何报错。
-- **解法**：v3 脚本（`scripts/eval_euroc.sh`）：`-F','` + 首字段纯数字判数据行 + `$6 $7 $8 $5`，并在转换时加模长自检：数据首行 (qw,qx,qy,qz) 模长偏离 1 直接报错退出，杜绝同类假设错误静默通过。
-- **原理**：评测数字被污染的方向取决于该指标用到数据的哪部分——平移 ATE 没坏是侥幸不是正确。TUM(xyzw) 与 ASL/ROS geometry_msgs(wxyz) 两套约定并行二十年；评测脚本对新格式数据的第一行做断言（模长、时间戳单位、列数）是唯一可靠的防线。README 结果已按 v3 脚本用官方真值重测确认。
+- **为什么 evo 不报错、平移 ATE 还是对的**：`evo/tools/file_interface.py` 的 `read_tum_trajectory_file` 读入后只做列 roll（xyzw→wxyz），不归一化也不校验模长（模长校验只在 `check()` 里警告）。平移 APE 和 Umeyama 对齐只用位置坐标，四元数列不进这条路径——A/B 实测两种列序的平移 RMSE 逐位相同（0.1176 m）。四元数只在旋转评测和一切用到真值姿态的场景生效，那里 2.77° 变 66.3°，无任何报错。
+- **解法**：v3 脚本（`scripts/eval_euroc.sh`）：`-F','` + 首字段纯数字判数据行 + `$6 $7 $8 $5`，并在转换时加模长自检：数据首行 (qw,qx,qy,qz) 模长偏离 1 直接报错退出。
+- **原理**：评测数字被污染的方向取决于该指标用到数据的哪部分。TUM(xyzw) 与 ASL/ROS geometry_msgs(wxyz) 两套约定并行二十年，评测脚本对新格式数据的第一行做断言（模长、时间戳单位、列数）。README 结果已按 v3 脚本用官方真值重测确认。
 
 ### 9. evo 安装的环境问题（容器 / 宿主机两种场景）
 
-- **容器内**：`pip3 install evo` 被 PEP 668 拦截（noble / Python 3.12 的 externally-managed-environment）。解法 `pip3 install --break-system-packages evo`，一次性镜像内安全。注意 `|| pip3 install evo` 式降级重试是反模式：降级命令撞上同一个 PEP 668 错误，误导排查方向。
+- **容器内**：`pip3 install evo` 被 PEP 668 拦截（noble / Python 3.12 的 externally-managed-environment）。解法 `pip3 install --break-system-packages evo`，一次性镜像内安全。
 - **宿主机 `pip --user`**：`evo_ape` 报 `ValueError: numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88`。根因：22.04 系统 scipy 针对 numpy 1.x 编译，`pip --user evo` 拉入 numpy 2.x，`~/.local` 优先级高于系统包但系统 scipy 二进制未变。解法 `pip3 install --user --upgrade scipy`（1.15+ wheel 兼容 numpy 2.x）。
-- **宿主机画图又一层**：`evo_res -p` 报 `ImportError: cannot import name 'docstring' from 'matplotlib'`。根因：pip 的 matplotlib 3.10 wheel 不再带 `mpl_toolkits/__init__.py`（命名空间包），而 apt 装的 `/usr/lib/python3/dist-packages/mpl_toolkits` 是有 `__init__.py` 的常规包——Python 的 import 规则是常规包优先于命名空间包，于是 mplot3d 仍然解析到系统旧版、和新版 matplotlib 拼不上。给 `~/.local` 的 mpl_toolkits 补空 `__init__.py` 不可靠，别在这条路上耗。
+- **宿主机画图**：`evo_res -p` 报 `ImportError: cannot import name 'docstring' from 'matplotlib'`。根因：pip 的 matplotlib 3.10 wheel 不再带 `mpl_toolkits/__init__.py`（命名空间包），而 apt 装的 `/usr/lib/python3/dist-packages/mpl_toolkits` 是有 `__init__.py` 的常规包——Python 的 import 规则是常规包优先于命名空间包，mplot3d 仍解析到系统旧版、和新版 matplotlib 拼不上。给 `~/.local` 的 mpl_toolkits 补空 `__init__.py` 不能解决。
 - **无头机器的画图后端**：venv 装好后 `evo_res -p` 报 `Failed to import any of the following Qt binding modules`。evo 的 `~/.evo/settings.json` 里 `plot_backend` 默认 `qtagg`，服务器没 Qt，改成 `agg` 即可。
-- **最终答案**：评测环境要么全在容器里，要么全部 venv（22.04 需先 `apt install python3.10-venv`）。宿主机裸 `pip --user` 混装科学计算栈，每一个包都是一个坑位。
+- **环境隔离**：评测环境要么全在容器里，要么全部 venv（22.04 需先 `apt install python3.10-venv`）。
 
 ## 附：rosbag1 → rosbag2 转换
 
