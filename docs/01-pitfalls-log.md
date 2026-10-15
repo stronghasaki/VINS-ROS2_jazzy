@@ -94,6 +94,9 @@ RUN apt-get install -y libopencv-dev libboost-filesystem-dev \
 
 - **容器内**：`pip3 install evo` 被 PEP 668 拦截（noble / Python 3.12 的 externally-managed-environment）。解法 `pip3 install --break-system-packages evo`，一次性镜像内安全。注意 `|| pip3 install evo` 式降级重试是反模式：降级命令撞上同一个 PEP 668 错误，误导排查方向。
 - **宿主机 `pip --user`**：`evo_ape` 报 `ValueError: numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88`。根因：22.04 系统 scipy 针对 numpy 1.x 编译，`pip --user evo` 拉入 numpy 2.x，`~/.local` 优先级高于系统包但系统 scipy 二进制未变。解法 `pip3 install --user --upgrade scipy`（1.15+ wheel 兼容 numpy 2.x）。
+- **宿主机画图又一层**：`evo_res -p` 报 `ImportError: cannot import name 'docstring' from 'matplotlib'`。根因：pip 的 matplotlib 3.10 wheel 不再带 `mpl_toolkits/__init__.py`（命名空间包），而 apt 装的 `/usr/lib/python3/dist-packages/mpl_toolkits` 是有 `__init__.py` 的常规包——Python 的 import 规则是常规包优先于命名空间包，于是 mplot3d 仍然解析到系统旧版、和新版 matplotlib 拼不上。给 `~/.local` 的 mpl_toolkits 补空 `__init__.py` 不可靠，别在这条路上耗。
+- **无头机器的画图后端**：venv 装好后 `evo_res -p` 报 `Failed to import any of the following Qt binding modules`。evo 的 `~/.evo/settings.json` 里 `plot_backend` 默认 `qtagg`，服务器没 Qt，改成 `agg` 即可。
+- **最终答案**：评测环境要么全在容器里，要么全部 venv（22.04 需先 `apt install python3.10-venv`）。宿主机裸 `pip --user` 混装科学计算栈，每一个包都是一个坑位。
 
 ## 附：rosbag1 → rosbag2 转换
 
