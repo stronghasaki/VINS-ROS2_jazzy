@@ -6,11 +6,13 @@ VINS-Fusion 的 ROS2 Jazzy 移植，附 EuRoC 基准结果和 Docker 复现环�
 
 ## EuRoC 结果（MH_01_easy, stereo+IMU）
 
-| ATE RMSE | mean | max |
-|---|---|---|
-| 0.118 m | 0.101 m | 0.322 m |
+| 平移 ATE RMSE | mean | max | 旋转 APE mean |
+|---|---|---|---|
+| 0.118 m | 0.101 m | 0.322 m | 2.77° |
 
-492 个关键帧，solver 约 45 ms/frame。评测用 `evo_ape`（TUM 格式，`--align --correct_scale`，`t_max_diff 0.02`），真值为 EuRoC state_groundtruth_estimate0。轨迹和 evo 结果文件在 `scripts/` 下，可以 `evo_res` 直接对比。
+492 个关键帧，solver 约 45 ms/frame。评测用 `evo_ape`（TUM 格式，`--align --correct_scale`，`t_max_diff 0.02`），真值为 EuRoC 官方 state_groundtruth_estimate0（从 ETH research-collection 原包抽取，转换脚本 `scripts/eval_euroc.sh` 带四元数模长自检）。轨迹和 evo 结果文件在 `scripts/` 下，可以 `evo_res` 直接对比。
+
+注：早期 README 的 0.118 m 由一份有列序 bug 的真值转换脚本算出（详见 docs/01-pitfalls-log.md 坑 8——evo 的平移 APE 只用位置，该 bug 不影响平移指标，但会毁掉旋转评测）。上表已用修正版脚本对官方真值重测确认（0.1176 m）。
 
 ## 复现
 
