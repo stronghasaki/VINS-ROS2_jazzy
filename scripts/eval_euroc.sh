@@ -9,7 +9,7 @@
 #       awk 默认空白分隔会把整行吞成 $1，字段全空）。改用 -F','，以首字段是否纯数字判定数据行。
 # 前置：vins_result_no_loop.csv / vins_result_loop.csv（VINS 输出的 TUM 格式轨迹）
 #       以及 groundtruth/data.csv（EuRoC state_groundtruth_estimate0）
-# 用法：./eval_euroc.sh <csv路径> [MH_01_easy目录]
+# 用法：./eval_euroc.sh <vins输出的csv路径> [groundtruth data.csv 路径]
 set -euo pipefail
 
 CSV=${1:?usage: eval_euroc.sh <vins_result.csv> [euroc_dataset_dir]}

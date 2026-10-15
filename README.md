@@ -16,9 +16,16 @@ VINS-Fusion 的 ROS2 Jazzy 移植，附 EuRoC 基准结果和 Docker 复现环�
 
 ## 复现
 
-宿主机只需 Docker，不用装 ROS。
+宿主机只需 Docker，不用装 ROS。数据集放哪里都行，下面用 `$DATA` 表示其路径。
 
 ```bash
+# 0. 数据集：EuRoC MH_01_easy
+# 从 https://projects.asl.ethz.ch/datasets/aerial-machinery-datasets/ 下载
+# MH_01_easy.zip（国内直连 ETH 慢的话走 hf-mirror，见 docs/01-pitfalls-log.md 坑 7），解压：
+#   $DATA/MH_01_easy.bag                          ← 第 3 步转 rosbag2 用
+#   $DATA/mav0/cam0/ cam1/ imu0/ state_groundtruth_estimate0/ ...
+#                                                 ← 第 5 步评测真值用
+
 # 1. 构建依赖镜像（Ceres 2.1.0 + OpenCV + Jazzy）
 cd docker
 docker build -f Dockerfile.base -t vins-jazzy-base .
@@ -30,20 +37,22 @@ docker run --rm -v $PWD/..:/ws -w /ws vins-jazzy-base \
 
 # 3. EuRoC 的 .bag 转成 rosbag2（Jazzy 读不了 .bag）
 pip3 install rosbags
-rosbags-convert MH_01_easy.bag --dst MH_01_easy_ros2
+rosbags-convert $DATA/MH_01_easy.bag --dst $DATA/MH_01_easy_ros2
 
 # 4. 跑
 docker run --rm --network host \
     -v $PWD/../src:/ws/src -v $PWD/../build:/ws/build -v $PWD/../install:/ws/install \
-    -v /path/to/MH_01_easy_ros2:/bags:ro -v $HOME/vins_out:/root \
+    -v $DATA/MH_01_easy_ros2:/bags:ro -v $HOME/vins_out:/root \
     vins-jazzy-base bash -c "source /opt/ros/jazzy/setup.bash && \
     source /ws/install/local_setup.bash && \
     (ros2 launch vins euroc.launch.py &) && sleep 8 && \
     ros2 bag play /bags && sleep 30"
 # 轨迹输出在 $HOME/vins_out/output/vio.csv（TUM 格式）
 
-# 5. 评测
-evo_ape tum groundtruth.tum vio.csv -a -as --t_max_diff 0.02
+# 5. 评测（脚本做真值 TUM 化 + 四元数模长自检 + evo_ape）
+./scripts/eval_euroc.sh $HOME/vins_out/output/vio.csv \
+    $DATA/mav0/state_groundtruth_estimate0/data.csv
+# 结果: vio.csv.ape.zip + gt_mh01.tum，多次实验用 evo_res *.ape.zip 对比
 ```
 
 注意：`build/` 和 `install/` 必须同时挂载，colcon `--symlink-install` 生成的 `install/*/lib/**` 是指向 `build/` 的软链接，只挂一个会找不到可执行文件。
