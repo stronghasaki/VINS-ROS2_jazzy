@@ -107,3 +107,18 @@ rosbags-convert MH_01_easy.bag --dst MH_01_easy_ros2
 ```
 
 转换后 `ros2 bag info` 核对消息数与原 bag 一致再跑。
+
+### 10. rosbags 转出的 bag，Jazzy `ros2 bag play` 直接报 yaml-cpp bad conversion
+
+- **现象**：`ros2 bag info` / `ros2 bag play` 一启动就报 `Exception on parsing info file: yaml-cpp: error at line 25, column 29: bad conversion`，bag 完全播不了，VINS 侧表现为一直 "waiting for image and imu"。报错行号恰好落在 `metadata.yaml` 里 `offered_qos_profiles: ''` 的引号上，极易误判成 VINS 配置文件问题（VINS 自己的 yaml 走 OpenCV FileStorage，不经 yaml-cpp）。
+- **根因**：rosbags 写出的 metadata 是旧 schema——`offered_qos_profiles` 是字符串（转出来还是空串），且没有 `type_description_hash` 字段。Jazzy 的 rosbag2 解析器要求 `offered_qos_profiles` 是 YAML 序列（空序列也得写不带引号的 `[]`，写成字符串 `'[]'` 同样报 bad conversion），且每个 topic 必须带 `type_description_hash`。
+- **排查**：`ros2 bag info` 和 play 走同一个解析路径，单跑 info 三秒复现。做变体二分：删字段报 `invalid node; first invalid key: "offered_qos_profiles"`（字段必填），写 `'[]'` 仍报 bad conversion（类型不对），写裸 `[]` 才过、报错变成缺 hash——三条变体拼出真实 schema。
+- **解法**：db3 不用动，只补 metadata.yaml：
+
+  ```bash
+  cp metadata.yaml metadata.yaml.orig-rosbags
+  sed -e "s|offered_qos_profiles: ''|offered_qos_profiles: []|" metadata.yaml.orig-rosbags \
+    | sed 's|\(      serialization_format: cdr\)|\1\n      type_description_hash: ""|' > metadata.yaml
+  ```
+
+- **原理**：跨版本的 bag 元数据是 schema 演进的重灾区。yaml-cpp 报错的行号指向值节点的起始位置（引号、方括号），不是"这行内容写错了"，别顺着行号猜，用增删字段做二分。

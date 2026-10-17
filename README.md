@@ -6,11 +6,12 @@ VINS-Fusion 的 ROS2 Jazzy 移植，附 EuRoC 基准结果和 Docker 复现环�
 
 ## EuRoC 结果（MH_01_easy, stereo+IMU）
 
-| 平移 ATE RMSE | mean | max | 旋转 APE mean |
-|---|---|---|---|
-| 0.118 m | 0.101 m | 0.322 m | 2.77° |
+| 平移 ATE RMSE | mean | max | 旋转 APE mean | 有效帧率 |
+|---|---|---|---|---|
+| 0.118 m | 0.101 m | 0.322 m | 2.77° | ~2.7 Hz（首测，机器过载丢帧，3682 帧只消化 492 帧） |
+| 0.163 m | 0.149 m | 0.369 m | 1.90° | ~10 Hz（feature_tracker freq 限频，消化 1830 帧） |
 
-492 个关键帧，solver 约 45 ms/frame。评测用 `evo_ape`（TUM 格式，`--align --correct_scale`，`t_max_diff 0.02`），真值为 EuRoC 官方 state_groundtruth_estimate0（从 ETH research-collection 原包抽取，转换脚本 `scripts/eval_euroc.sh` 带四元数模长自检）。轨迹和 evo 结果文件在 `scripts/` 下，可以 `evo_res` 直接对比。
+两次都真实测得。VINS 的精度跟有效帧率走：丢帧越多相邻处理帧基线越长，平移 ATE 反而更好、旋转更差——复现数字对不上号，先查自己的 vio.csv 行数 ÷ 序列时长。评测用 `evo_ape`（TUM 格式，`--align --correct_scale`，`t_max_diff 0.02`），真值为 EuRoC 官方 state_groundtruth_estimate0（从 ETH research-collection 原包抽取，转换脚本 `scripts/eval_euroc.sh` 带四元数模长自检）。轨迹和 evo 结果文件在 `scripts/` 下，可以 `evo_res` 直接对比。
 
 注：早期 README 的 0.118 m 由一份有列序 bug 的真值转换脚本算出（详见 docs/01-pitfalls-log.md 坑 8——evo 的平移 APE 只用位置，该 bug 不影响平移指标，但会毁掉旋转评测）。上表已用修正版脚本对官方真值重测确认（0.1176 m）。
 
@@ -39,9 +40,18 @@ docker run --rm -v $PWD/..:/ws -w /ws vins-jazzy-base \
 pip3 install rosbags
 rosbags-convert $DATA/MH_01_easy.bag --dst $DATA/MH_01_easy_ros2
 
-# 4. 跑
+# 3.5 rosbags 转出的 metadata 是旧 schema，不补 Jazzy 读不了（ros2 bag info 三秒可验，
+#     报 yaml-cpp bad conversion 就是它；详见 pitfalls 坑 10）
+cd $DATA/MH_01_easy_ros2
+cp metadata.yaml metadata.yaml.orig-rosbags
+sed -e "s|offered_qos_profiles: ''|offered_qos_profiles: []|" metadata.yaml.orig-rosbags \
+  | sed 's|\(      serialization_format: cdr\)|\1\n      type_description_hash: ""|' > metadata.yaml
+cd -
+
+# 4. 跑（src 必须挂到 /ws/src/src：install/ 内 launch/config 软链接指向 /ws/src/src/**，
+#    挂成 /ws/src 会报 FileNotFoundError，见 pitfalls 坑 6）
 docker run --rm --network host \
-    -v $PWD/../src:/ws/src -v $PWD/../build:/ws/build -v $PWD/../install:/ws/install \
+    -v $PWD/../src:/ws/src/src -v $PWD/../build:/ws/build -v $PWD/../install:/ws/install \
     -v $DATA/MH_01_easy_ros2:/bags:ro -v $HOME/vins_out:/root \
     vins-jazzy-base bash -c "source /opt/ros/jazzy/setup.bash && \
     source /ws/install/local_setup.bash && \
@@ -55,7 +65,7 @@ docker run --rm --network host \
 # 结果: vio.csv.ape.zip + gt_mh01.tum，多次实验用 evo_res *.ape.zip 对比
 ```
 
-注意：`build/` 和 `install/` 必须同时挂载，colcon `--symlink-install` 生成的 `install/*/lib/**` 是指向 `build/` 的软链接，只挂一个会找不到可执行文件。
+注意：`build/` 和 `install/` 必须同时挂载，colcon `--symlink-install` 生成的 `install/*/lib/**` 是指向 `build/` 的软链接，只挂一个会找不到可执行文件；同理 src 要挂到 `/ws/src/src`（坑 6 / 坑 10 见 [docs/01-pitfalls-log.md](docs/01-pitfalls-log.md)）。
 
 ## Notes
 
