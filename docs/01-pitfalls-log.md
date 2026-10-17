@@ -69,7 +69,8 @@ RUN apt-get install -y libopencv-dev libboost-filesystem-dev \
 - **现象**：`ros2 launch vins euroc.launch.py` 无报错，输出文件是上一次的旧数据。
 - **根因**：colcon `--symlink-install` 生成的 `install/vins/lib/vins/vins_node` 是指向 `/ws/build/...` 的符号链接；容器只挂载 `install/` 时可执行文件不存在，而 launch 文件对"进程未启动"是静默的。
 - **解法**：挂载成对出现：`-v repo/build:/ws/build -v repo/install:/ws/install`。排查命令：`ls -la install/vins/lib/vins/` 查看链接指向。
-- **原理**：symlink install 将构建产物与安装产物绑定，容器挂载 / 打包 / 跨机拷贝时任一单独存在都是坏的；要么成对携带，要么构建时不用 `--symlink-install`。
+- **补充（构建布局同样被定格）**：share 下的 launch/config 链接指向的是**构建时** src 的容器内路径。构建挂 `-v $PWD/..:/ws`（包在 `/ws/src/vins`）就生成指向 `/ws/src/**` 的链接，运行时把 src 挂到 `/ws/src/src` 必报 FileNotFoundError——构建与运行的挂载布局必须完全一致。本项目统一 src 挂 `/ws/src/src`（构建、运行都是）。注意不要同时挂 repo 根和 `/ws/src/src`：colcon 会发现重复包直接报错退出。
+- **原理**：symlink install 将构建产物与安装产物绑定，容器挂载 / 打包 / 跨机拷贝时任一单独存在都是坏的；符号链接存的是路径字符串，能不能解析只看容器内挂载点——构建时路径即运行时路径。要么布局一致，要么构建时不用 `--symlink-install`。
 
 ## 评测期
 
@@ -91,29 +92,39 @@ RUN apt-get install -y libopencv-dev libboost-filesystem-dev \
 
 ### 9. evo 安装的环境问题（容器 / 宿主机两种场景）
 
-- **容器内**：`pip3 install evo` 被 PEP 668 拦截（noble / Python 3.12 的 externally-managed-environment）。解法 `pip3 install --break-system-packages evo`，一次性镜像内安全。
+- **容器内**：`pip3 install evo` 被 PEP 668 拦截（noble / Python 3.12 的 externally-managed-environment）。解法 `pip3 install --break-system-packages --ignore-installed evo`——只加 `--break-system-packages` 还会在收尾时报 `ERROR: Cannot uninstall numpy 1.26.4, RECORD file not found (installed by debian)`（debian 装的 numpy 没有 pip 卸载元数据），`--ignore-installed` 让 pip 不尝试卸载 debian 版直接盖上。一次性镜像内安全。
 - **宿主机 `pip --user`**：`evo_ape` 报 `ValueError: numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88`。根因：22.04 系统 scipy 针对 numpy 1.x 编译，`pip --user evo` 拉入 numpy 2.x，`~/.local` 优先级高于系统包但系统 scipy 二进制未变。解法 `pip3 install --user --upgrade scipy`（1.15+ wheel 兼容 numpy 2.x）。
 - **宿主机画图**：`evo_res -p` 报 `ImportError: cannot import name 'docstring' from 'matplotlib'`。根因：pip 的 matplotlib 3.10 wheel 不再带 `mpl_toolkits/__init__.py`（命名空间包），而 apt 装的 `/usr/lib/python3/dist-packages/mpl_toolkits` 是有 `__init__.py` 的常规包——Python 的 import 规则是常规包优先于命名空间包，mplot3d 仍解析到系统旧版、和新版 matplotlib 拼不上。给 `~/.local` 的 mpl_toolkits 补空 `__init__.py` 不能解决。
 - **无头机器的画图后端**：venv 装好后 `evo_res -p` 报 `Failed to import any of the following Qt binding modules`。evo 的 `~/.evo/settings.json` 里 `plot_backend` 默认 `qtagg`，服务器没 Qt，改成 `agg` 即可。
 - **环境隔离**：评测环境要么全在容器里，要么全部 venv（22.04 需先 `apt install python3.10-venv`）。
 
-## 附：rosbag1 → rosbag2 转换
+## 附：数据集下载与 rosbag1 → rosbag2 转换
+
+### 11. EuRoC 官方下载页迁移 + 国内镜像
+
+- **现象**：README 里写的 `projects.asl.ethz.ch/datasets/aerial-machinery-datasets/` 返回 404（ASL 数据集页已改版）。
+- **现状**：官方页现为 https://projects.asl.ethz.ch/datasets/euroc-mav/ （2026-10 验证 200）。国内直连 ETH 慢/不稳时，可用 hf-mirror 上的第三方镜像：`https://hf-mirror.com/datasets/GlowBond/EuRoC_MAV_Dataset/resolve/main/machine_hall.zip`（machine_hall.zip 内含各序列的 `.bag` 与 `mav0/` 真值目录；第三方镜像，建议下载后核对文件大小/条数）。
+- **原理**：数据集官网搬家不留 301 的不少见；引用外部下载地址的 README，定期 `curl -sI` 抽查一下链接活性。
+
+### rosbag1 → rosbag2 转换
 
 Jazzy 移除了 rosbag1 支持，EuRoC 的 `.bag` 需先转 rosbag2 格式，用 python `rosbags` 包，无需装 ROS1：
 
 ```bash
-pip3 install rosbags
-rosbags-convert MH_01_easy.bag --dst MH_01_easy_ros2
+pip3 install -U rosbags
+rosbags-convert --src MH_01_easy.bag --dst MH_01_easy_ros2
 ```
+
+注：0.10.x 时代 `rosbags-convert` 接受位置参数，0.11.x 起必须 `--src`，否则 `error: the following arguments are required: --src`。
 
 转换后 `ros2 bag info` 核对消息数与原 bag 一致再跑。
 
 ### 10. rosbags 转出的 bag，Jazzy `ros2 bag play` 直接报 yaml-cpp bad conversion
 
 - **现象**：`ros2 bag info` / `ros2 bag play` 一启动就报 `Exception on parsing info file: yaml-cpp: error at line 25, column 29: bad conversion`，bag 完全播不了，VINS 侧表现为一直 "waiting for image and imu"。报错行号恰好落在 `metadata.yaml` 里 `offered_qos_profiles: ''` 的引号上，极易误判成 VINS 配置文件问题（VINS 自己的 yaml 走 OpenCV FileStorage，不经 yaml-cpp）。
-- **根因**：rosbags 写出的 metadata 是旧 schema——`offered_qos_profiles` 是字符串（转出来还是空串），且没有 `type_description_hash` 字段。Jazzy 的 rosbag2 解析器要求 `offered_qos_profiles` 是 YAML 序列（空序列也得写不带引号的 `[]`，写成字符串 `'[]'` 同样报 bad conversion），且每个 topic 必须带 `type_description_hash`。
+- **根因**：旧版 rosbags 写出的 metadata 是旧 schema——`offered_qos_profiles` 是字符串（转出来还是空串），且没有 `type_description_hash` 字段。Jazzy 的 rosbag2 解析器要求 `offered_qos_profiles` 是 YAML 序列（空序列也得写不带引号的 `[]`，写成字符串 `'[]'` 同样报 bad conversion），且每个 topic 必须带 `type_description_hash`。**是否踩中取决于 rosbags 版本**：0.11.5 实测已是 Jazzy schema（`[]` + RIHS01 hash），转完直接能用；旧版转出的才是旧 schema。所以先 `ros2 bag info` 判断，不要无条件打补丁——对 0.11.5 的输出跑补丁 sed 会插入第二个 `type_description_hash`（重复键）。
 - **排查**：`ros2 bag info` 和 play 走同一个解析路径，单跑 info 三秒复现。做变体二分：删字段报 `invalid node; first invalid key: "offered_qos_profiles"`（字段必填），写 `'[]'` 仍报 bad conversion（类型不对），写裸 `[]` 才过、报错变成缺 hash——三条变体拼出真实 schema。
-- **解法**：db3 不用动，只补 metadata.yaml：
+- **解法**：db3 不用动，只补 metadata.yaml（仅旧 schema 需要）：
 
   ```bash
   cp metadata.yaml metadata.yaml.orig-rosbags

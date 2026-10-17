@@ -21,8 +21,8 @@ VINS-Fusion 的 ROS2 Jazzy 移植，附 EuRoC 基准结果和 Docker 复现环�
 
 ```bash
 # 0. 数据集：EuRoC MH_01_easy
-# 从 https://projects.asl.ethz.ch/datasets/aerial-machinery-datasets/ 下载
-# MH_01_easy.zip（国内直连 ETH 慢的话走 hf-mirror，见 docs/01-pitfalls-log.md 坑 7），解压：
+# 从 https://projects.asl.ethz.ch/datasets/euroc-mav/ 下载 MH_01_easy.zip
+# （国内直连 ETH 慢的话走 hf-mirror 第三方镜像，见 docs/01-pitfalls-log.md 坑 11），解压：
 #   $DATA/MH_01_easy.bag                          ← 第 3 步转 rosbag2 用
 #   $DATA/mav0/cam0/ cam1/ imu0/ state_groundtruth_estimate0/ ...
 #                                                 ← 第 5 步评测真值用
@@ -32,20 +32,24 @@ cd docker
 docker build -f Dockerfile.base -t vins-jazzy-base .
 
 # 2. 编译工作区（~10 min，8GB 内存放缓一点见 Notes）
-docker run --rm -v $PWD/..:/ws -w /ws vins-jazzy-base \
-    bash -c "source /opt/ros/jazzy/setup.bash && \
+#    构建时的挂载布局会被 --symlink-install 定格进 install/ 的软链接，
+#    必须与步骤 4 的运行挂载完全一致：src 同样挂 /ws/src/src（坑 6）
+docker run --rm -v $PWD/../src:/ws/src/src -v $PWD/../build:/ws/build -v $PWD/../install:/ws/install \
+    -w /ws vins-jazzy-base bash -c "source /opt/ros/jazzy/setup.bash && \
     MAKEFLAGS=-j2 colcon build --symlink-install --parallel-workers 1"
 
 # 3. EuRoC 的 .bag 转成 rosbag2（Jazzy 读不了 .bag）
-pip3 install rosbags
-rosbags-convert $DATA/MH_01_easy.bag --dst $DATA/MH_01_easy_ros2
+pip3 install -U rosbags
+rosbags-convert --src $DATA/MH_01_easy.bag --dst $DATA/MH_01_easy_ros2
+cd $DATA/MH_01_easy_ros2 && ros2 bag info .
+# ↑ 三秒验证。正常输出直接跳到步骤 4；报 yaml-cpp bad conversion 才做 3.5
 
-# 3.5 rosbags 转出的 metadata 是旧 schema，不补 Jazzy 读不了（ros2 bag info 三秒可验，
-#     报 yaml-cpp bad conversion 就是它；详见 pitfalls 坑 10）
-cd $DATA/MH_01_easy_ros2
+# 3.5 仅旧版 rosbags 需要（转出的 metadata 是旧 schema，坑 10）。
+#     0.11.5 转出的已是 Jazzy schema，跳过本步——sed 会插入重复键
 cp metadata.yaml metadata.yaml.orig-rosbags
 sed -e "s|offered_qos_profiles: ''|offered_qos_profiles: []|" metadata.yaml.orig-rosbags \
   | sed 's|\(      serialization_format: cdr\)|\1\n      type_description_hash: ""|' > metadata.yaml
+ros2 bag info .   # 这次应正常
 cd -
 
 # 4. 跑（src 必须挂到 /ws/src/src：install/ 内 launch/config 软链接指向 /ws/src/src/**，
@@ -95,4 +99,4 @@ docker run --rm --network host \
 
 ## License
 
-GPLv3，继承自上游。数据集：[EuRoC MAV](https://projects.asl.ethz.ch/datasets/aerial-machinery-datasets/) (ETH Zurich)。
+GPLv3，继承自上游。数据集：[EuRoC MAV](https://projects.asl.ethz.ch/datasets/euroc-mav/) (ETH Zurich)。
