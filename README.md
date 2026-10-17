@@ -64,6 +64,8 @@ docker run --rm --network host \
 # 轨迹输出在 $HOME/vins_out/output/vio.csv（TUM 格式）
 
 # 5. 评测（脚本做真值 TUM 化 + 四元数模长自检 + evo_ape）
+#    evo 没装的话：容器内 pip3 install --break-system-packages --ignore-installed evo
+#    （宿主机装的坑见 pitfalls 坑 9：PEP 668 / numpy-scipy ABI / 画图后端）
 ./scripts/eval_euroc.sh $HOME/vins_out/output/vio.csv \
     $DATA/mav0/state_groundtruth_estimate0/data.csv
 # 结果: vio.csv.ape.zip + gt_mh01.tum，多次实验用 evo_res *.ape.zip 对比
